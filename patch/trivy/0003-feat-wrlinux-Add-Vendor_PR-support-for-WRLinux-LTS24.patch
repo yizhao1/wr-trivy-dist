@@ -1,0 +1,99 @@
+From 3a899fda6e626b767203a9fe90e07f023b316623 Mon Sep 17 00:00:00 2001
+From: Yi Zhao <yi.zhao@windriver.com>
+Date: Thu, 6 Feb 2025 21:32:20 +0800
+Subject: [PATCH] feat(wrlinux): Add Vendor_PR support for WRLinux LTS24
+
+For Vendor_PR-enabled release (e.g. LTS24), WR Trivy needs to directly
+compare the installed package versions against the recorded fix versions
+in the Trivy database.
+
+Signed-off-by: Yi Zhao <yi.zhao@windriver.com>
+---
+ pkg/detector/ospkg/wrlinux/wrlinux.go | 67 +++++++++++++++++++++++++--
+ 1 file changed, 64 insertions(+), 3 deletions(-)
+
+diff --git a/pkg/detector/ospkg/wrlinux/wrlinux.go b/pkg/detector/ospkg/wrlinux/wrlinux.go
+index d4478a801..5d27d38b9 100644
+--- a/pkg/detector/ospkg/wrlinux/wrlinux.go
++++ b/pkg/detector/ospkg/wrlinux/wrlinux.go
+@@ -105,9 +105,18 @@ func (s *Scanner) Detect(ctx context.Context, osVer string, _ *ftypes.Repository
+ 				vulns = append(vulns, vuln)
+ 				continue
+ 			}
+-			if osVerLT(osVer, strings.Split(adv.FixedVersion, " ")[0]) {
+-				vuln.FixedVersion = adv.FixedVersion
+-				vulns = append(vulns, vuln)
++
++			release := OsVerToRelease(osVer)
++			if release == "10.24" {
++				if pkgVerLT(vuln.InstalledVersion, adv.FixedVersion) {
++					vuln.FixedVersion = adv.FixedVersion
++					vulns = append(vulns, vuln)
++				}
++			} else {
++				if osVerLT(osVer, strings.Split(adv.FixedVersion, " ")[0]) {
++					vuln.FixedVersion = adv.FixedVersion
++					vulns = append(vulns, vuln)
++				}
+ 			}
+ 		}
+ 	}
+@@ -159,3 +168,55 @@ func OsVerToRelease(osVer string) string {
+ 	}
+ 	return strings.Join(s[:2], ".")
+ }
++
++// returns true if s1, is strictly less that s2
++// false otherwise
++func pkgVerLT(s1, s2 string) bool {
++	s1_spl := strings.Split(GetVerPR(s1), ".")
++	s2_spl := strings.Split(GetVerPR(s2), ".")
++
++	a1 := SetVerArray(s1_spl)
++	a2 := SetVerArray(s2_spl)
++
++	return CompareVerArray(a1, a2)
++}
++
++// gets PR
++// e.g. "curl-8.7.1-r0.wr2404" -> "2404"
++func GetVerPR(s string) string {
++	substr := ".wr"
++	return s[strings.LastIndex(s, substr)+len(substr):]
++}
++
++// puts PR into an array with 5 elements
++// e.g. "2404.1" -> |2404|1|0|0|0|
++func SetVerArray(s []string) [5]int {
++	arr := [5]int{}
++
++	for i, _ := range s {
++		n, err := strconv.Atoi(s[i])
++		if err != nil {
++			fmt.Printf("n error\n")
++		}
++
++		arr[i] = n
++	}
++
++	return arr
++}
++
++// compares elements in the array in order
++// e.g. |2404|0|0|0|0| < |2404|1|0|0|0|
++func CompareVerArray(a1, a2 [5]int) bool {
++	for i := 0; i < 5; i++ {
++		if a1[i] < a2[i] {
++			return true
++		}
++
++		if a1[i] > a2[i] {
++			return false
++		}
++	}
++
++	return false
++}
+-- 
+2.25.1
+
